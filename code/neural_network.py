@@ -1,143 +1,56 @@
-import pickle
-import csv
+import nnfs
+from nnfs.datasets import spiral_data
+nnfs.init()
 
-import matplotlib.pyplot as plt
-# Visualizations will be shown in the notebook.
-%matplotlib inline
-from layer import Layer
-import matplotlib.mlab as mlab
-import random
-import numpy as np
+class Layer_Dense:
+  def __init__(self,n_inputs,n_neurons):
+    self.weights = 0.10 * np.random.randn(n_inputs, n_neurons)
+    self.biases = np.zeros((1,n_neurons))
+  def forward(self,inputs):
+    self.output = np.dot(inputs,self.weights) + self.biases
 
-import cv2
-import random
-from sklearn.utils import shuffle
+class Activation_ReLU:
+  def forward(self,inputs):
+    self.output = np.maximum(0, inputs)
 
-import tensorflow as tf
-from tensorflow.contrib.layers import flatten
+class Activation_Softmax:
+  def forward(self,inputs):
+    exp_values = np.exp(inputs-np.max(inputs, axis =1,keepdims=True))
+    probabilities = exp_values / np.sum(exp_values, axis =1,keepdims=True)
+    self.output = probabilities
 
-import os
-from os import listdir
-from skimage.io import imread
+class Loss:
+  def calculate(self,output,y):
+    sample_losses = self.forward(output,y)
+    data_loss = np.mean(sample_losses)
+    return data_loss
 
-# Base class
-class Layer:
-    def __init__(self):
-        self.input = None
-        self.output = None
+class Loss_Categorical_Cross_Entropy(Loss):
+  def forward(self,y_pred,y_true):
+    samples = len(y_pred)
+    y_pred_clipped = np.clip(y_pred, 1e-7,1-1e-7)
+    if len(y_true.shape) ==1:
+      correct_confidenses = y_pred_clipped[range(samples),y_true]
+    elif len(y_true.shape) ==2:
+      correct_confidenses = np.sum(y_pred_clipped*y_true,axis=1)
+    negative_log_likelihoods = -np.log(correct_confidenses)
+    return negative_log_likelihoods
 
-    # computes the output Y of a layer for a given input X
-    def forward_propagation(self, input):
-        raise NotImplementedError
+X, y = spiral_data(100,3)
 
-    # computes dE/dX for a given dE/dY (and update parameters if any)
-    def backward_propagation(self, output_error, learning_rate):
-        raise NotImplementedError
-# inherit from base class Layer
-class FCLayer(Layer):
-    # input_size = number of input neurons
-    # output_size = number of output neurons
-    def __init__(self, input_size, output_size):
-        self.weights = np.random.rand(input_size, output_size) - 0.5
-        self.bias = np.random.rand(1, output_size) - 0.5
+dense1 = Layer_Dense(2,3)
+activation1 = Activation_ReLU()
 
-    # returns output for a given input
-    def forward_propagation(self, input_data):
-        self.input = input_data
-        self.output = np.dot(self.input, self.weights) + self.bias
-        return self.output
+dense2 = Layer_Dense(3,3)
+activation2 = Activation_Softmax()
 
-    # computes dE/dW, dE/dB for a given output_error=dE/dY. Returns input_error=dE/dX.
-    def backward_propagation(self, output_error, learning_rate):
-        input_error = np.dot(output_error, self.weights.T)
-        weights_error = np.dot(self.input.T, output_error)
-        # dBias = output_error
+dense1.forward(X)
+activation1.forward(dense1.output)
+dense2.forward(activation1.output)
+activation2.forward(dense2.output)
 
-        # update parameters
-        self.weights -= learning_rate * weights_error
-        self.bias -= learning_rate * output_error
-        return input_error
-# inherit from base class Layer
-class ActivationLayer(Layer):
-    def __init__(self, activation, activation_prime):
-        self.activation = activation
-        self.activation_prime = activation_prime
 
-    # returns the activated input
-    def forward_propagation(self, input_data):
-        self.input = input_data
-        self.output = self.activation(self.input)
-        return self.output
 
-    # Returns input_error=dE/dX for a given output_error=dE/dY.
-    # learning_rate is not used because there is no "learnable" parameters.
-    def backward_propagation(self, output_error, learning_rate):
-        return self.activation_prime(self.input) * output_error
-# activation function and its derivative
-def tanh(x):
-    return np.tanh(x);
-
-def tanh_prime(x):
-    return 1-np.tanh(x)**2;
-# loss function and its derivative
-def mse(y_true, y_pred):
-    return np.mean(np.power(y_true-y_pred, 2));
-
-def mse_prime(y_true, y_pred):
-    return 2*(y_pred-y_true)/y_true.size;
-class Network:
-    def __init__(self):
-        self.layers = []
-        self.loss = None
-        self.loss_prime = None
-
-    # add layer to network
-    def add(self, layer):
-        self.layers.append(layer)
-
-    # set loss to use
-    def use(self, loss, loss_prime):
-        self.loss = loss
-        self.loss_prime = loss_prime
-
-    # predict output for given input
-    def predict(self, input_data):
-        # sample dimension first
-        samples = len(input_data)
-        result = []
-
-        # run network over all samples
-        for i in range(samples):
-            # forward propagation
-            output = input_data[i]
-            for layer in self.layers:
-                output = layer.forward_propagation(output)
-            result.append(output)
-
-        return result
-
-    # train the network
-    def fit(self, x_train, y_train, epochs, learning_rate):
-        # sample dimension first
-        samples = len(x_train)
-
-        # training loop
-        for i in range(epochs):
-            err = 0
-            for j in range(samples):
-                # forward propagation
-                output = x_train[j]
-                for layer in self.layers:
-                    output = layer.forward_propagation(output)
-
-                # compute loss (for display purpose only)
-                err += self.loss(y_train[j], output)
-
-                # backward propagation
-                error = self.loss_prime(y_train[j], output)
-                for layer in reversed(self.layers):
-                    error = layer.backward_propagation(error, learning_rate)
-
-            # calculate average error on all samples
-            err /= samples
-            print('epoch %d/%d   error=%f' % (i+1, epochs, err))
+loss_function = Loss_Categorical_Cross_Entropy()
+loss = loss_function.calculate(activation2.output,y)
+print(loss)
